@@ -6,6 +6,9 @@
   https://www.youtube.com/c/jordanrubin6502
   2021 Jordan Rubin.
 */
+#define RESET_PIN 23                  //The factory default pin on the device
+#define LED 2                         //Hardware LED or other as desired
+#define RESET_DELAY 5000              //Hold down time for factory default mS
 #define WEBSERVPORT 80
 #include <Arduino.h>  
 #include <WiFi.h>
@@ -13,18 +16,12 @@
 #include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
 #include <ESPmDNS.h>
-#include <WiFiUdp.h>
-#include <NTP.h>
-#include <Sprinkler.h>
+#include <SPIFFS.h>
 
 const char* ssid = "sprinklersystem";    //SSID of the netconfig Access point
 const char* deviceName = "sprinkler32";  //Mdns name sprinkler32.local
 
 AsyncWebServer server(WEBSERVPORT);
-SPRINKLERSYSTEM sprinklersystem(2,23,5000);
-
-WiFiUDP wifiUdp;
-NTP ntp(wifiUdp);
 void startup();                         // Pre-declaration for simplicity
 
 //////////////////////////////////////////////////////////////////////////
@@ -52,11 +49,52 @@ void handleCss(AsyncWebServerRequest *request) {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[readConfigfile]---------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void readConfigfile( char * value, const char * filename, const char * parameter){
+  char B;
+  File file = SPIFFS.open(filename);
+  if (file){  
+    char filebuf[80];
+    int chr = 0;
+      while(file.available()){    
+         B = file.read();
+         if ((chr == 0) && ((B == ' ')||(B == '#'))){continue;}              
+         if ((B =='\r') || (B == '\n')){
+           filebuf[chr] = '\0';
+           char * p = strstr(filebuf,parameter);          
+           if(p) {
+             chr = 0;
+             byte read =0;
+             for (int q=0; q < strlen(p); q++){
+                 if (read == 0){
+                    if(p[q] != 61){continue;}
+                    else {
+                      read = 1; continue;
+                    }
+                 }
+                 value[chr] = p[q];
+                 chr++;
+             }
+             value[chr] = '\0';            
+             break;
+           }
+           chr = 0;
+         }
+     filebuf[chr] = B;
+     chr++;
+     }
+  }
+  file.close();
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[handleCheckStatus]------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void handleCheckStatus(AsyncWebServerRequest *request) {
-    char result[30];         
-    sprinklersystem.readConfigFile(result,"/testresult.cnf","CONN");
+    char result[30];
+    readConfigfile(result,"/testresult.cnf","CONN");          
     Serial.print(F("CONNECTION -> ")); Serial.println(result);
     request->send(200, "text/html", result);
     if (strcmp(result,"SUCCESS") == 0){
@@ -72,6 +110,21 @@ void handleCheckStatus(AsyncWebServerRequest *request) {
 void stringToarray (char * convstr, String input) {
    int str_len = input.length() + 1; 
    input.toCharArray(convstr, str_len);   
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[ledBlink]---------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void ledBlink(int count, int speed){
+  if ((count ==1)&&(speed==0)){digitalWrite(LED,HIGH); return;}
+  if ((count ==0)&&(speed==0)){digitalWrite(LED,LOW); return;}
+  for (int i = 0; i < count; ++i) {
+    delay(speed);
+    digitalWrite(LED,HIGH);
+    delay(speed);
+    digitalWrite(LED,LOW);
+  }
 }
 //-----------------------------------------------------------------------]
 
@@ -129,11 +182,11 @@ void configNetwork() {
     Serial.print(F("Error starting mDNS"));
   }
   if (SPIFFS.exists("/testnetwork.cnf")){
-    char ssid[50];          
-    sprinklersystem.readConfigFile(ssid,"/testnetwork.cnf","SSID");
+    char ssid[50];
+    readConfigfile(ssid,"/testnetwork.cnf","SSID");            
     Serial.print(F("Attempting with SSID -> ")); Serial.println(ssid);
     char key[50];
-    sprinklersystem.readConfigFile(key,"/testnetwork.cnf","PASSWORD");    
+    readConfigfile(key,"/testnetwork.cnf","PASSWORD");    
     if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
     File resultfile = SPIFFS.open("/testresult.cnf","w");
     if (!resultfile){
@@ -147,7 +200,7 @@ void configNetwork() {
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
       Serial.print(".");
-      sprinklersystem.statusLedBlink(1,100);
+      ledBlink(1,100);
       i++;
       if (i==15){
         Serial.print("\nWifi Conn. Failed, Restarting\n");
@@ -169,14 +222,35 @@ void configNetwork() {
 //-----------------------------------------------------------------------]
 
 //////////////////////////////////////////////////////////////////////////
+//-FUNCTION-[checkReset]-------------------------------------------------]
+//////////////////////////////////////////////////////////////////////////
+void checkReset() {
+    double now = millis();
+    while (digitalRead(RESET_PIN)){
+      if ((millis()-now) >= RESET_DELAY){
+        Serial.println(F("Defaulting Security!!!"));
+        Serial.println(F("Removing network configs"));
+        SPIFFS.remove("/network.cnf");
+        SPIFFS.remove("/testresult.cnf");
+        SPIFFS.remove("/testnetwork.cnf");
+        Serial.println("Rebooting....");
+        ledBlink(30,20);
+        ESP.restart();
+        break;
+      }
+   } 
+}
+//-----------------------------------------------------------------------]
+
+//////////////////////////////////////////////////////////////////////////
 //-FUNCTION-[loadNetwork]------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void loadNetwork() {
-    char ssid[50];   
-    sprinklersystem.readConfigFile(ssid,"/network.cnf","SSID");
+    char ssid[50];
+    readConfigfile(ssid,"/network.cnf","SSID");    
     Serial.print("    SSID -> "); Serial.println(ssid);
-    char key[50];  
-    sprinklersystem.readConfigFile(key,"/network.cnf","PASSWORD");  
+    char key[50];
+    readConfigfile(key,"/network.cnf","PASSWORD");    
     if(SPIFFS.exists("/testresult.cnf")){SPIFFS.remove("/testresult.cnf");}
     WiFi.begin(ssid,key);
     int i =0;
@@ -184,7 +258,7 @@ void loadNetwork() {
     while (WiFi.status() != WL_CONNECTED) {
       delay(500);
       Serial.print(".");
-      sprinklersystem.statusLedBlink(1,100);
+      ledBlink(1,100);
       i++;
       if (i==15){
         Serial.print("\nNETWORK: Wifi Conn. Failed, Restarting\n");
@@ -192,7 +266,7 @@ void loadNetwork() {
         startup();        
     }
   }
-  sprinklersystem.statusLedBlink(1,0);
+  ledBlink(1,0);
   if (!MDNS.begin(deviceName)){
     Serial.print("\nmDNS:    Error Starting...");
   }
@@ -200,10 +274,6 @@ void loadNetwork() {
     Serial.print("\nmDNS:    Listed as ");Serial.print(deviceName); Serial.println(".local");
   }  
     Serial.print("NETWORK: Connected at "); Serial.println(WiFi.localIP());
-    ntp.begin();
-    Serial.print("NTP:     ");
-    Serial.print(ntp.formattedTime("%d. %B %Y  ")); // dd. Mmm yyyy
-    Serial.println(ntp.formattedTime("%T")); // dd. Mmm yyyy
     server.on("/", HTTP_GET , handleRoot);
 }
 //-----------------------------------------------------------------------]
@@ -212,7 +282,7 @@ void loadNetwork() {
 //-SYSTEM-[startup]------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void startup(){
-  sprinklersystem.factoryDefaultChk();
+  checkReset();
   if (SPIFFS.exists("/network.cnf")){
      Serial.println("NETWORK: Already configured, Loading......");
      loadNetwork();
@@ -236,10 +306,12 @@ void startup(){
 void setup() {
   Serial.begin(115200);
   Serial.println("\n\n***Rubin Projects Boot Framework***\n   technocoma.blogspot.com 2021\n");
-  if(!sprinklersystem.startSpiffFs()){
-        Serial.println("SPIFFS: An Error has occurred while mounting SPIFFS");
-        return;
-  } 
+  pinMode(RESET_PIN, INPUT); 
+  pinMode(LED,OUTPUT);
+  if(!SPIFFS.begin()){
+     Serial.println("SPIFFS: An Error has occurred while mounting SPIFFS");
+     return;
+  }
   else {Serial.println("SPIFFS:  Mounted");}
   startup();
 }
@@ -248,7 +320,7 @@ void setup() {
 //-SYSTEM-[loop]---------------------------------------------------------]
 //////////////////////////////////////////////////////////////////////////
 void loop() {
-  sprinklersystem.factoryDefaultChk();
+  checkReset();
   delay(5000);
 }
 //-----------------------------------------------------------------------]
