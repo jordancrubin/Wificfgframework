@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>ESP32 Network Configuration Page</title>
+    <meta charset=utf-8" http-equiv="Content-Type">
+    <link rel="stylesheet" href="mystyle.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  </head>
+  <body onload="updateWifiList();">
+  <table class="mytable">
+  <tr>
+    <td>
+      <font size=4><b><u>Wireless Network Configuration</b></font> 
+    </td>
+    <td>
+     <button type="button" id="refreshButton" onclick="updateWifiList()"> Refresh</button>
+    </td>  
+  </tr>
+  <tr>
+    <td colspan=2>
+      <select id="Wifilist" onchange="selectChange()">
+      </select>
+    </td>
+  </tr>
+  <tr>
+    <td colspan=2>  
+      <table id = "keySection" border =0>
+        <tr>
+          <td colspan =2>
+            <center><div id="spinner" class="loader"></div></center><BR>
+            Key:
+            <input type="password" id="keyfield" size="30" maxlength="30"><br>
+            <input type="checkbox" onclick="showPass()">Show Password 
+          </td>
+        </tr>
+        <tr>
+          <td colspan =2>
+            <button type="button" id="connectButton" onclick="connectWifi()">Connect</button>
+          </td>
+        </tr>
+      </table>
+      </td>
+    </tr>
+    <tr>
+      <td colspan=2>
+        <center><a href="http://technocoma.blogspot.com">technocoma.blogspot.com</a></center>
+      </td>
+    </tr>
+  </table>
+  <script>
+///////////////////////////////// connectWifi()  Connection request routine
+    function connectWifi(){
+       var dropdown = document.getElementById('Wifilist');
+       var spinner = document.getElementById('spinner');
+       spinner.style.display = 'block';
+       var ssid = dropdown.options[dropdown.selectedIndex].value;
+       var key = document.getElementById('keyfield').value;
+       var xhr = new XMLHttpRequest();
+       xhr.onreadystatechange = function() {
+       if (this.readyState == 4 && this.status == 200) {
+        console.log(this.responseText);
+        if (this.responseText == "RCVD"){
+          console.log("Check Success...");
+          var xhttp = new XMLHttpRequest();
+          xhttp.onreadystatechange = function() {
+            if (this.readyState == 4 && this.status == 200) {
+              if(this.responseText){
+                var message = 'Connection was a success.  The ESP32 is now on the wireless network. Wait about 10 seconds for your device to connect over to that network and click OK';
+                if (this.responseText == 'FAIL'){message = "Connection failed.  Bad password or SSID, Check that you are still connected to ESP32 and try again...";}
+                clearInterval(inspection);
+                spinner.style.display = 'none';
+                alert(message);
+                if (this.responseText == 'SUCCESS'){
+                 location.reload();
+                }
+              }           
+            }
+          };   
+          var inspection = setInterval(function(){  xhttp.open("GET", "checkStatus", true); 
+              xhttp.send();
+            }, 10000);     
+          }
+        }
+      }; 
+      xhr.open("POST", "connectwWifi", true);
+      xhr.setRequestHeader("Content-type", "application/x-www-form-urlencoded");
+      xhr.send("ssidval="+ssid+"&keyval="+key+"");   
+    }
+///////////////////////////////////////////////////////////////////
+
+///////////////////////////////// selectChange()  Dynamic select box functions  
+    function selectChange() {
+      var dropdown = document.getElementById('Wifilist');
+      var keysect = document.getElementById('keySection');
+      var key = document.getElementById('keyfield');
+      key.value = "";
+      console.log(dropdown.selectedIndex);
+      if (dropdown.selectedIndex == 0){
+        keysect.style.display = 'none';
+      }
+      else {
+        keysect.style.display = 'block';
+      }   
+    }
+///////////////////////////////////////////////////////////////////
+
+///////////////////////////////// showPass()  show or hide password field
+    function showPass() {
+      var x = document.getElementById("keyfield");
+      if (x.type === "password") {
+        x.type = "text";
+      } 
+      else {
+        x.type = "password";
+      }
+    } 
+///////////////////////////////////////////////////////////////////
+
+///////////////////////////////// updateWifilist()  Dynamic refresh of SSIDs  
+    function updateWifiList() {
+      var dropdown = document.getElementById('Wifilist');
+      var keysect = document.getElementById('keySection');
+      var spinner = document.getElementById('spinner');
+      spinner.style.display = 'none';
+      keysect.style.display = 'none';     
+      var option;
+      dropdown.length = 0;
+      defaultOption = document.createElement('option');
+      defaultOption.text = "Refreshing network list";
+      dropdown.add(defaultOption);
+      var xhr = new XMLHttpRequest();
+      xhr.onreadystatechange = function() {
+        if (this.readyState == 4 && this.status == 200) {
+          var data = JSON.parse(this.responseText);
+          dropdown.length = 0;
+          defaultOption = document.createElement('option');
+          defaultOption.text = 'Choose a network.....';
+          dropdown.add(defaultOption);
+          dropdown.selectedIndex = 0;
+          for (let i = 0; i < data.length; i++) {
+            option = document.createElement('option');
+            option.text = data[i].name;
+            option.value = data[i].val;
+            dropdown.add(option);
+          }
+        }
+      };  
+      xhr.open("GET", "getWifiList", true);
+      xhr.send();
+    }
+///////////////////////////////////////////////////////////////////
+  </script>
+  </body>
+</html>
